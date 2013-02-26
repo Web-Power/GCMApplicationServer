@@ -56,4 +56,16 @@ class MulticastResultTest extends \PHPUnit_Framework_TestCase
         $this->assertEquals(23, $retryMulticastIds[0]);
         $this->assertEquals(42, $retryMulticastIds[1]);
     }
+
+    public function testSerializable()
+    {
+        $expected = MulticastResult::builder(4, 8, 15, 16)
+            ->addResult(Result::builder()->messageId("23")->build())
+            ->addResult(Result::builder()->messageId("42")->build())
+            ->build();
+
+        $actual = unserialize(serialize($expected));
+
+        $this->assertEquals($expected, $actual);
+    }
 }

@@ -44,4 +44,20 @@ class MessageTest extends \PHPUnit_Framework_TestCase
         $this->assertContains('k1=v1', $toString);
         $this->assertContains('k2=v2', $toString);
     }
+
+    public function testIsSerializable()
+    {
+        $expected = Message::builder()
+            ->collapseKey('108')
+            ->delayWhileIdle(true)
+            ->timeToLive(42)
+            ->addData('k1', 'old value')
+            ->addData('k1', 'v1')
+            ->addData('k2', 'v2')
+            ->build()
+        ;
+        $actual = unserialize(serialize($expected));
+
+        $this->assertEquals($expected, $actual);
+    }
 }
