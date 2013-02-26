@@ -1,6 +1,11 @@
 <?php
 namespace WebPower\gcm\server;
 
+function usleep($time) {
+    SenderTest::$slept = true;
+    SenderTest::$sleepTimeList[] = $time / 1000;
+}
+
 class MockHttpClient implements HttpClient
 {
     public $apiKey;
@@ -23,9 +28,13 @@ class MockHttpClient implements HttpClient
 
 class SenderTest extends \PHPUnit_Framework_TestCase
 {
+    public static $slept;
+    public static $sleepTimeList;
+
     private $regId = "15;16";
     private $collapseKey = "collapseKey";
     private $delayWhileIdle = true;
+    private $retries = 42;
     private $ttl = 108;
     private $authKey = "4815162342";
 
@@ -37,6 +46,9 @@ class SenderTest extends \PHPUnit_Framework_TestCase
 
     /** @var Sender */
     private $sender;
+
+    /** @var Result */
+    private $result;
 
     protected function setUp()
     {
@@ -51,8 +63,12 @@ class SenderTest extends \PHPUnit_Framework_TestCase
             ->build();
 
         $this->mockClient = new MockHttpClient();
-        $this->sender = new Sender($this->authKey);
+        $this->sender = $this->getMock('WebPower\gcm\server\Sender', null, array($this->authKey));
         $this->sender->setHttpClient($this->mockClient);
+
+        $this->result = Result::builder()->build();
+        self::$slept = false;
+        self::$sleepTimeList = array();
     }
 
     public function setResponseExpectations($statusCode, $content)
@@ -68,7 +84,102 @@ class SenderTest extends \PHPUnit_Framework_TestCase
         new Sender(null);
     }
 
-    public function testSendNoRetry_ok()
+    public function testSingleSend_noRetryOk()
+    {
+        $this->sender = $this->getMock('WebPower\gcm\server\Sender', array('singleSendNoRetry'), array($this->authKey));
+        $this->sender->expects($this->any())->method('singleSendNoRetry')->with($this->message, $this->regId)->will($this->returnValue($this->result));
+        $this->sender->singleSend($this->message, $this->regId, 0);
+        $this->assertFalse(self::$slept);
+    }
+
+    /**
+     * @expectedException \RuntimeException
+     */
+    public function testSingleSend_noRetryFail()
+    {
+        $this->sender = $this->getMock('WebPower\gcm\server\Sender', array('singleSendNoRetry'), array($this->authKey));
+        $this->sender->expects($this->any())->method('singleSendNoRetry')->with($this->message, $this->regId)->will($this->returnValue(null));
+        $this->sender->singleSend($this->message, $this->regId, 0);
+        $this->assertFalse(self::$slept);
+    }
+
+    /**
+     * @expectedException \RuntimeException
+     */
+    public function testSingleSend_noRetryException()
+    {
+        $this->sender = $this->getMock('WebPower\gcm\server\Sender', array('singleSendNoRetry'), array($this->authKey));
+        $this->sender->expects($this->any())->method('singleSendNoRetry')->with($this->message, $this->regId)->will($this->throwException(new \RuntimeException()));
+        $this->sender->singleSend($this->message, $this->regId, 0);
+    }
+
+    public function testSingleSend_retryOk()
+    {
+        $returns = array(
+            null, // fails 1st time
+            null, // fails 2nd time
+            $this->result // succeeds 3rd time
+        );
+        $this->sender = $this->getMock('WebPower\gcm\server\Sender', array('singleSendNoRetry'), array($this->authKey));
+        $this->sender->expects($this->exactly(3))
+            ->method('singleSendNoRetry')
+            ->with($this->message, $this->regId)
+            ->will($this->returnCallback(function() use(&$returns) {
+                        return array_shift($returns);
+                    }));
+
+        $this->sender->singleSend($this->message, $this->regId, 2);
+    }
+
+    /**
+     * @expectedException \RuntimeException
+     */
+    public function testSingleSend_retryFails()
+    {
+        $returns = array(
+            null, // fails 1st time
+            null, // fails 2nd time
+            null // fails 3rd time
+        );
+        $this->sender = $this->getMock('WebPower\gcm\server\Sender', array('singleSendNoRetry'), array($this->authKey));
+        $this->sender->expects($this->exactly(3))
+            ->method('singleSendNoRetry')
+            ->with($this->message, $this->regId)
+            ->will($this->returnCallback(function() use(&$returns) {
+                        return array_shift($returns);
+                    }));
+
+        $this->sender->singleSend($this->message, $this->regId, 2);
+    }
+
+    public function testSingleSend_retryExponentialBackoff()
+    {
+        $total = $this->retries + 1; // first attempt + retries
+        $this->sender = $this->getMock('WebPower\gcm\server\Sender', array('singleSendNoRetry'), array($this->authKey));
+        $this->sender->expects($this->exactly($total))->method('singleSendNoRetry')->with($this->message, $this->regId)->will($this->returnValue(null));
+
+        try {
+            $this->sender->singleSend(
+                $this->message,
+                $this->regId,
+                $this->retries
+            );
+            $this->fail('Should have thrown RuntimeException');
+        } catch (\RuntimeException $e) {
+            $this->assertContains('' . $total, $e->getMessage(), 'invalid message:'.$e->getMessage());
+        }
+        $this->assertEquals($this->retries, count(self::$sleepTimeList));
+        $backoffRange = Sender::BACKOFF_INITIAL_DELAY;
+        foreach (self::$sleepTimeList as $value) {
+            $this->assertTrue($value >= $backoffRange / 2);
+            $this->assertTrue($value <= $backoffRange * 3 / 2);
+            if (2 * $backoffRange < Sender::MAX_BACKOFF_DELAY) {
+                $backoffRange *= 2;
+            }
+        }
+    }
+
+    public function testSingleSendNoRetry_ok()
     {
         $this->setResponseExpectations(200, "id=4815162342");
         $result = $this->sender->singleSendNoRetry($this->message, $this->regId);
@@ -79,7 +190,7 @@ class SenderTest extends \PHPUnit_Framework_TestCase
         $this->assertRequestBody();
     }
 
-    public function testSendNoRetry_ok_canonical()
+    public function testSingleSendNoRetry_ok_canonical()
     {
         $this->setResponseExpectations(
             200,
@@ -93,7 +204,7 @@ class SenderTest extends \PHPUnit_Framework_TestCase
         $this->assertRequestBody();
     }
 
-    public function testSendNoRetry_unauthorized()
+    public function testSingleSendNoRetry_unauthorized()
     {
         $this->setResponseExpectations(401, "");
         try {
@@ -167,6 +278,139 @@ class SenderTest extends \PHPUnit_Framework_TestCase
     public function testSendNoRetry_noRegistrationId()
     {
         $this->sender->singleSendNoRetry(Message::builder()->build(), null);
+    }
+
+    public function testSend_json_allAttemptsFail()
+    {
+        $unavailableResult = Result::builder()->errorCode('Unavailable')->build();
+        $regIds = array("108");
+        $mockedResult = MulticastResult::builder(0, 0, 0, 42)->addResult($unavailableResult)->build();
+        $this->sender = $this->getMock('WebPower\gcm\server\Sender', array('SendNoRetry'), array($this->authKey));
+        $this->sender->expects($this->any())->method('SendNoRetry')->with($this->message, $regIds)->will($this->returnValue($mockedResult));
+    }
+
+    public function testSend_json_secondAttemptOk()
+    {
+        $unavailableResult = Result::builder()->errorCode('Unavailable')->build();
+        $okResult = Result::builder()->messageId("42")->build();
+        $mockedResult1 = MulticastResult::builder(0, 0, 0, 100)
+            ->addResult($unavailableResult)->build();
+        $mockedResult2 = MulticastResult::builder(0, 0, 0, 200)
+            ->addResult($okResult)->build();
+        $regIds = array("108");
+        $returns = array(
+            $mockedResult1,
+            $mockedResult2
+        );
+
+        /** @var $sender Sender */
+        $sender = $this->getMock('WebPower\gcm\server\Sender', array('sendNoRetry'), array($this->authKey));
+        $sender->expects($this->exactly(2))
+            ->method('sendNoRetry')
+            ->with($this->message, $regIds)
+            ->will($this->returnCallback(function() use(&$returns) {
+                        return array_shift($returns);
+                    }));
+
+        $actualResult = $sender->send($this->message, $regIds, 10);
+        $this->assertNotNull($actualResult);
+        $this->assertEquals(1, $actualResult->getTotal());
+        $this->assertEquals(1, $actualResult->getSuccess());
+        $this->assertEquals(0, $actualResult->getFailure());
+        $this->assertEquals(0, $actualResult->getCanonicalIds());
+        $this->assertEquals(100, $actualResult->getMulticastId());
+        $results = $actualResult->getResults();
+        $this->assertEquals(1, count($results));
+        $this->assertResult($results[0], "42", null, null);
+        $retryMulticastIds = $actualResult->getRetryMulticastIds();
+        $this->assertEquals(1, count($retryMulticastIds));
+        $this->assertEquals(200, $retryMulticastIds[0]);
+    }
+
+    public function testSend_json_ok()
+    {
+        /*
+         * The following scenario is mocked below:
+         *
+         * input: 4, 8, 15, 16, 23, 42
+         *
+         * 1st call (multicast_id:100): 4,16:ok 8,15,23:unavailable, 42:error,
+         * 2nd call (multicast_id:200): 8,15: unavailable, 23:ok
+         * 3rd call (multicast_id:300): 8:error, 15:unavailable
+         * 4th call (multicast_id:400): 15:unavailable
+         *
+         * output: total:6, success:3, error: 3, canonicals: 0, multicast_id: 100
+         *         results: ok, error, unavailable, ok, ok, error
+         */
+        $valueMap = array();
+        $unavailableResult = Result::builder()->errorCode('Unavailable')->build();
+        $errorResult = Result::builder()->errorCode("D'OH!")->build();
+        $okResultMsg4 = Result::builder()->messageId("msg4")->build();
+        $okResultMsg16 = Result::builder()->messageId("msg16")->build();
+        $okResultMsg23 = Result::builder()->messageId("msg23")->build();
+        $result1stCall = MulticastResult::builder(0, 0, 0, 100)
+            ->addResult($okResultMsg4)
+            ->addResult($unavailableResult)
+            ->addResult($unavailableResult)
+            ->addResult($okResultMsg16)
+            ->addResult($unavailableResult)
+            ->addResult($errorResult)
+            ->build();
+        $valueMap[] = array($this->message, array("4", "8", "15", "16", "23", "42"), $result1stCall);
+
+        $result2ndCall = MulticastResult::builder(0, 0, 0, 200)
+            ->addResult($unavailableResult)
+            ->addResult($unavailableResult)
+            ->addResult($okResultMsg23)
+            ->build();
+        $valueMap[] = array($this->message, array("8", "15", "23"), $result2ndCall);
+
+        $result3rdCall = MulticastResult::builder(0, 0, 0, 300)
+            ->addResult($errorResult)
+            ->addResult($unavailableResult)
+            ->build();
+        $valueMap[] = array($this->message, array("8", "15"), $result3rdCall);
+
+        $result4thCall = MulticastResult::builder(0, 0, 0, 400)
+            ->addResult($unavailableResult)
+            ->build();
+        $valueMap[] = array($this->message, array("15"), $result4thCall);
+
+        /** @var $sender Sender */
+        $sender = $this->getMock('WebPower\gcm\server\Sender', array('sendNoRetry'), array($this->authKey));
+        $sender->expects($this->exactly(4))
+            ->method('sendNoRetry')
+            ->will($this->returnValueMap($valueMap));
+
+        $actualResult = $sender->send($this->message, array("4", "8", "15", "16", "23", "42"), 3);
+
+        $this->assertNotNull($actualResult);
+        $this->assertEquals(6, $actualResult->getTotal());
+        $this->assertEquals(3, $actualResult->getSuccess());
+        $this->assertEquals(3, $actualResult->getFailure());
+        $this->assertEquals(0, $actualResult->getCanonicalIds());
+        $this->assertEquals(100, $actualResult->getMulticastId());
+        $actualResults = $actualResult->getResults();
+        $this->assertEquals(6, count($actualResults));
+        $this->assertResult($actualResults[0], "msg4", null, null); // 4
+        $this->assertResult($actualResults[1], null, "D'OH!", null); // 8
+        $this->assertResult($actualResults[2], null, "Unavailable", null); // 15
+        $this->assertResult($actualResults[3], "msg16", null, null); // 16
+        $this->assertResult($actualResults[4], "msg23", null, null); // 23
+        $this->assertResult($actualResults[5], null, "D'OH!", null); // 42
+        $retryMulticastIds = $actualResult->getRetryMulticastIds();
+        $this->assertEquals(3, count($retryMulticastIds));
+        $this->assertEquals(200, $retryMulticastIds[0]);
+        $this->assertEquals(300, $retryMulticastIds[1]);
+        $this->assertEquals(400, $retryMulticastIds[2]);
+    }
+
+    /**
+     * @expectedException \InvalidArgumentException
+     */
+    public function testSendNoRetry_json_emptyRegIds()
+    {
+        $this->sender->sendNoRetry($this->message, array());
     }
 
     public function testSendNoRetry_json_badRequest()

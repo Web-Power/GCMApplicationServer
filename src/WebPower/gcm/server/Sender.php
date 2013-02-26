@@ -78,7 +78,7 @@ class Sender implements LoggerAwareInterface
         // to send the messages
         /** @var $results Result[] */
         $results = array();
-        $unsentRegIds = array();
+        $unsentRegIds = $regIds;
         $multicastIds = array();
 
         do {
@@ -371,7 +371,7 @@ class Sender implements LoggerAwareInterface
         return $this->getHttpClient()->post($this->key, $url, $mimeType, $requestBody);
     }
 
-    private function updateStatus(array $unsentRegIds, array $allResults, MulticastResult $multicastResult)
+    private function updateStatus(array $unsentRegIds, array &$allResults, MulticastResult $multicastResult)
     {
         $results = $multicastResult->getResults();
         if (count($results) != count($unsentRegIds)) {
