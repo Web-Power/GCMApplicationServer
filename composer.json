@@ -1,0 +1,25 @@
+{
+    "name": "webpower/gcm-application-server",
+    "type": "library",
+    "description": "Google Cloud Messaging Application Server port from JAVA to PHP",
+    "keywords": ["push", "GCM", "java port"],
+    "website": "http://developer.android.com/reference/com/google/android/gcm/server/package-summary.html",
+    "license": "Apache License v2.0",
+    "authors": [
+        {
+            "name": "Christaan Baartse",
+            "email": "christiaan@baartse.nl"
+        }
+    ],
+    "autoload": {
+        "psr-0": { "WebPower\\gcm\\server": "src/" }
+    },
+    "require": {
+        "php": ">=5.3.3",
+        "psr/log": "1.0.*",
+        "kriswallsmith/buzz": "0.9"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "3.7.*"
+    }
+}
