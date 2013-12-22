@@ -1,6 +1,7 @@
 GCMApplicationServer
 ====================
 [![Build Status](https://travis-ci.org/Web-Power/GCMApplicationServer.png?branch=master)](https://travis-ci.org/Web-Power/GCMApplicationServer)
+[![Scrutinizer Quality Score](https://scrutinizer-ci.com/g/Web-Power/GCMApplicationServer/badges/quality-score.png?s=d417df85457edc0c5a5b1a162a0cd77b74242306)](https://scrutinizer-ci.com/g/Web-Power/GCMApplicationServer/)
 
 This is a port to PHP of the official [com.google.android.gcm.server JAVA package](http://developer.android.com/reference/com/google/android/gcm/server/package-summary.html).
 
