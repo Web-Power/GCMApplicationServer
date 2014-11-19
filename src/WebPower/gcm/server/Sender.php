@@ -21,6 +21,8 @@ class Sender implements LoggerAwareInterface
     private $logger;
     /** @var HttpClient */
     private $httpClient;
+    /** @var string */
+    private $GCMSendEndpoint;
 
     public function __construct($key)
     {
@@ -28,6 +30,16 @@ class Sender implements LoggerAwareInterface
             throw new \InvalidArgumentException();
         }
         $this->key = $key;
+
+        $this->GCMSendEndpoint = Constants::GCM_SEND_ENDPOINT;
+    }
+
+    /**
+     * @param string $url
+     */
+    public function setEndPointUrl($url)
+    {
+        $this->GCMSendEndpoint = $url;
     }
 
     /**
@@ -177,7 +189,7 @@ class Sender implements LoggerAwareInterface
         }
 
         $conn = $this->post(
-            Constants::GCM_SEND_ENDPOINT,
+            $this->GCMSendEndpoint,
             "application/json",
             $requestBody
         );
@@ -302,7 +314,7 @@ class Sender implements LoggerAwareInterface
         if ($this->logger) {
             $this->logger->debug('Request body: ' . $requestBody);
         }
-        $conn = $this->post(Constants::GCM_SEND_ENDPOINT, "text/plain", $requestBody);
+        $conn = $this->post($this->GCMSendEndpoint, "text/plain", $requestBody);
         $status = $conn->getResponseCode();
         if ($status == 503) {
             if ($this->logger) {
