@@ -81,11 +81,7 @@ class Message implements \Serializable
             $properties[] = 'delayWhileIdle=' . ($this->delayWhileIdle ? 'true' : 'false') . ', ';
         }
         if ($this->data) {
-            $data = array();
-            foreach ($this->data as $key => $value) {
-                $data[] = $key . '=' . $value;
-            }
-            $properties[] = 'data: {' . implode(',', $data) . '}';
+            $properties[] = 'data: ' . json_encode($this->data);
         }
 
         return 'Message(' . implode(', ', $properties) . ')';

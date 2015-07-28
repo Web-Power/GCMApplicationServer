@@ -26,6 +26,7 @@ class MessageTest extends \PHPUnit_Framework_TestCase
             ->addData('k1', 'old value')
             ->addData('k1', 'v1')
             ->addData('k2', 'v2')
+            ->addData('k3', array(1,2,3))
             ->build()
         ;
 
@@ -33,7 +34,7 @@ class MessageTest extends \PHPUnit_Framework_TestCase
         $this->assertTrue($message->isDelayWhileIdle());
         $this->assertEquals(42, $message->getTimeToLive());
         $data = $message->getData();
-        $this->assertEquals(2, count($data));
+        $this->assertEquals(3, count($data));
         $this->assertEquals('v1', $data['k1']);
         $this->assertEquals('v2', $data['k2']);
 
@@ -41,8 +42,9 @@ class MessageTest extends \PHPUnit_Framework_TestCase
         $this->assertContains('collapseKey=108', $toString);
         $this->assertContains('timeToLive=42', $toString);
         $this->assertContains('delayWhileIdle=true', $toString);
-        $this->assertContains('k1=v1', $toString);
-        $this->assertContains('k2=v2', $toString);
+        $this->assertContains('"k1":"v1"', $toString);
+        $this->assertContains('"k2":"v2"', $toString);
+        $this->assertContains('"k3":[1,2,3]', $toString);
     }
 
     public function testIsSerializable()
